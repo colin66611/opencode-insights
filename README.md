@@ -21,7 +21,7 @@ Analyze your [OpenCode](https://opencode.ai) session history and generate an act
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/colin66611/opencode-insights/main/install.sh | bash
+curl -fsSL https://git.nevint.com/ds-odi/opencode-insights/-/raw/main/install.sh | bash
 ```
 
 ## Usage
@@ -49,10 +49,10 @@ The HTML report is saved to `~/.local/share/opencode/insight-report.html` and op
 ```bash
 mkdir -p ~/.config/opencode/commands
 
-curl -fsSL https://raw.githubusercontent.com/colin66611/opencode-insights/main/insight-stats.mjs \
+curl -fsSL https://git.nevint.com/ds-odi/opencode-insights/-/raw/main/insight-stats.mjs \
   -o ~/.config/opencode/insight-stats.mjs
 
-curl -fsSL https://raw.githubusercontent.com/colin66611/opencode-insights/main/insights.md \
+curl -fsSL https://git.nevint.com/ds-odi/opencode-insights/-/raw/main/insights.md \
   -o ~/.config/opencode/commands/insights.md
 ```
 

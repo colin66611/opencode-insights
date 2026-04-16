@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="https://raw.githubusercontent.com/colin66611/opencode-insights/main"
+REPO="https://git.nevint.com/ds-odi/opencode-insights/-/raw/main"
 OPENCODE_DIR="$HOME/.config/opencode"
 COMMANDS_DIR="$OPENCODE_DIR/commands"
 
