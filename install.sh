@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="https://raw.githubusercontent.com/colin66611/opencode-insights/main"
 OPENCODE_DIR="$HOME/.config/opencode"
 COMMANDS_DIR="$OPENCODE_DIR/commands"
 
@@ -17,8 +17,8 @@ fi
 
 mkdir -p "$COMMANDS_DIR"
 
-cp "$SCRIPT_DIR/insight-stats.mjs" "$OPENCODE_DIR/insight-stats.mjs"
-cp "$SCRIPT_DIR/insights.md"       "$COMMANDS_DIR/insights.md"
+curl -fsSL "$REPO/insight-stats.mjs" -o "$OPENCODE_DIR/insight-stats.mjs"
+curl -fsSL "$REPO/insights.md"       -o "$COMMANDS_DIR/insights.md"
 
 echo ""
 echo "✅ OpenCode Insights installed!"
