@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="https://git.nevint.com/ds-odi/opencode-insights/-/raw/main"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPENCODE_DIR="$HOME/.config/opencode"
 COMMANDS_DIR="$OPENCODE_DIR/commands"
 
@@ -17,8 +17,8 @@ fi
 
 mkdir -p "$COMMANDS_DIR"
 
-curl -fsSL "$REPO/insight-stats.mjs" -o "$OPENCODE_DIR/insight-stats.mjs"
-curl -fsSL "$REPO/insights.md"       -o "$COMMANDS_DIR/insights.md"
+cp "$SCRIPT_DIR/insight-stats.mjs" "$OPENCODE_DIR/insight-stats.mjs"
+cp "$SCRIPT_DIR/insights.md"       "$COMMANDS_DIR/insights.md"
 
 echo ""
 echo "✅ Done! Open OpenCode and run:"
