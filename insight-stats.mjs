@@ -183,17 +183,15 @@ if (!RENDER_MODE) {
   lines.push(`## 主要项目（按会话数）`)
   for (const [p, d] of agg.topProjects) lines.push(`- ${p}：${d.sessions}个会话，${d.msgs}条消息`)
   lines.push(``)
-  lines.push(`## 各会话详情（最近 ${Math.min(summaries.length, 50)} 个）`)
+  lines.push(`## 各会话详情（最近 ${Math.min(summaries.length, 20)} 个）`)
 
-  for (const s of summaries.slice(0, 50)) {
+  for (const s of summaries.slice(0, 20)) {
     lines.push(``)
     lines.push(`### [${s.date}] ${s.title}`)
     lines.push(`- 项目：${s.project} | 时长：${s.durationMin}分钟 | 消息：${s.userMsgs}条${s.errors > 0 ? ` | ⚠️错误：${s.errors}次` : ""}`)
-    lines.push(`- 工具：${Object.entries(s.tools).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([t,n])=>`${t}(${n})`).join(", ") || "无"}`)
-    lines.push(`- 代码：+${s.linesAdded}/-${s.linesDeleted}行`)
+    lines.push(`- 工具：${Object.entries(s.tools).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([t,n])=>`${t}(${n})`).join(", ") || "无"}`)
     if (s.userMessages.length > 0) {
-      lines.push(`- 用户消息摘要：`)
-      for (const m of s.userMessages) lines.push(`  > ${m.replace(/\n/g, " ")}`)
+      lines.push(`- 用户说：${s.userMessages.slice(0, 2).map(m => m.replace(/\n/g, " ").slice(0, 100)).join(" / ")}`)
     }
   }
 
