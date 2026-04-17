@@ -91,8 +91,18 @@ function escHtml(s) {
 }
 
 function parseJson(text) {
-  const m = text.match(/\{[\s\S]*\}/)
-  if (!m) throw new Error("未找到 JSON")
+  // strip markdown code blocks
+  const stripped = text.replace(/```(?:json)?\n?/g, "").trim()
+  const m = stripped.match(/\{[\s\S]*\}/)
+  if (!m) throw new Error("未找到 JSON object")
+  return JSON.parse(m[0])
+}
+
+function parseJsonArray(text) {
+  // strip markdown code blocks
+  const stripped = text.replace(/```(?:json)?\n?/g, "").trim()
+  const m = stripped.match(/\[[\s\S]*\]/)
+  if (!m) throw new Error("未找到 JSON array")
   return JSON.parse(m[0])
 }
 
@@ -565,7 +575,7 @@ function generateHtml(summaries, agg, sections, atAGlance) {
   let hlData = []
   const whatWorksText = getSectionText("what_works")
   if (whatWorksText) {
-    try { hlData = JSON.parse(whatWorksText.match(/\[[\s\S]*\]/)?.[0] ?? "[]") } catch (_) {}
+    try { hlData = parseJsonArray(whatWorksText) } catch (e) { process.stderr.write(`⚠️ what_works 解析失败: ${e.message}\n`) }
   }
   const highlightsHtml = hlData.length > 0 ? `
   <h2 id="section-highlights">工作流亮点</h2>
@@ -581,7 +591,7 @@ function generateHtml(summaries, agg, sections, atAGlance) {
   let frData = []
   const frictionText = getSectionText("friction_analysis")
   if (frictionText) {
-    try { frData = JSON.parse(frictionText.match(/\[[\s\S]*\]/)?.[0] ?? "[]") } catch (_) {}
+    try { frData = parseJsonArray(frictionText) } catch (e) { process.stderr.write(`⚠️ friction_analysis 解析失败: ${e.message}\n`) }
   }
   const frictionHtml = frData.length > 0 ? `
   <h2 id="section-friction">摩擦点分析</h2>
