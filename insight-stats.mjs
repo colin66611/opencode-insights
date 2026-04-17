@@ -25,11 +25,33 @@ const CACHE_TTL_MS = 12 * 60 * 60 * 1000
 mkdirSync(FACETS_DIR, { recursive: true })
 
 // ─── API Config ───────────────────────────────────────────────────────────────
+// 官方 provider 的默认 baseURL（无需用户配置 baseURL）
+const PROVIDER_BASE_URLS = {
+  anthropic: "https://api.anthropic.com/v1",
+  openai: "https://api.openai.com/v1",
+  groq: "https://api.groq.com/openai/v1",
+  deepseek: "https://api.deepseek.com/v1",
+  mistral: "https://api.mistral.ai/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+}
+
+// 官方 provider 的首选强力模型
+const PROVIDER_PREFERRED_MODELS = {
+  anthropic: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+  groq: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+  deepseek: ["deepseek-chat", "deepseek-coder"],
+  mistral: ["mistral-large-latest", "mistral-medium-latest"],
+  gemini: ["gemini-1.5-pro", "gemini-1.5-flash"],
+}
+
 function loadApiConfig() {
   if (!existsSync(CONFIG_PATH)) return null
   try {
     const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
     const disabled = new Set(cfg.disabled_providers ?? [])
+
+    // 优先：自定义 baseURL provider（国内代理等）
     for (const [id, provider] of Object.entries(cfg.provider ?? {})) {
       if (disabled.has(id)) continue
       const opts = provider.options ?? {}
@@ -39,6 +61,18 @@ function loadApiConfig() {
         const model = preferred.find((m) => models.includes(m)) ?? models[0]
         if (model) return { baseURL: opts.baseURL, apiKey: opts.apiKey, model, provider: id }
       }
+    }
+
+    // 回退：官方 provider（只有 apiKey，无 baseURL）
+    for (const [id, provider] of Object.entries(cfg.provider ?? {})) {
+      if (disabled.has(id)) continue
+      const opts = provider.options ?? {}
+      const baseURL = opts.baseURL ?? PROVIDER_BASE_URLS[id]
+      if (!opts.apiKey || !baseURL) continue
+      const models = Object.keys(provider.models ?? {})
+      const preferredList = PROVIDER_PREFERRED_MODELS[id] ?? []
+      const model = preferredList.find((m) => models.includes(m)) ?? models[0]
+      if (model) return { baseURL, apiKey: opts.apiKey, model, provider: id }
     }
   } catch (e) {
     process.stderr.write(`⚠️ 读取 API 配置失败: ${e.message}\n`)
@@ -50,22 +84,37 @@ const API_CFG = loadApiConfig()
 
 async function callLLM(messages, maxTokens = 4096) {
   if (!API_CFG) throw new Error("未找到可用的 API 配置")
-  const url = `${API_CFG.baseURL.replace(/\/$/, "")}/messages`
+
+  // 判断是否为 OpenAI 兼容格式（非 Anthropic）
+  const isOpenAICompat = !["anthropic"].includes(API_CFG.provider) &&
+    !API_CFG.baseURL.includes("anthropic.com")
+
+  const url = isOpenAICompat
+    ? `${API_CFG.baseURL.replace(/\/$/, "")}/chat/completions`
+    : `${API_CFG.baseURL.replace(/\/$/, "")}/messages`
+
+  const body = isOpenAICompat
+    ? { model: API_CFG.model, max_tokens: maxTokens, messages }
+    : { model: API_CFG.model, max_tokens: maxTokens, messages }
+
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": API_CFG.apiKey,
       "Authorization": `Bearer ${API_CFG.apiKey}`,
-      "anthropic-version": "2023-06-01",
+      ...(isOpenAICompat ? {} : {
+        "x-api-key": API_CFG.apiKey,
+        "anthropic-version": "2023-06-01",
+      }),
     },
-    body: JSON.stringify({ model: API_CFG.model, max_tokens: maxTokens, messages }),
+    body: JSON.stringify(body),
   })
   if (!resp.ok) {
     const err = await resp.text()
     throw new Error(`API ${resp.status}: ${err.slice(0, 200)}`)
   }
   const json = await resp.json()
+  // Anthropic: content[].text；OpenAI: choices[0].message.content
   const textBlock = Array.isArray(json.content) ? json.content.find((b) => b.type === "text") : null
   return textBlock?.text ?? json.choices?.[0]?.message?.content ?? ""
 }
