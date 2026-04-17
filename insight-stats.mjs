@@ -19,60 +19,48 @@ const DB_PATH = join(homedir(), ".local/share/opencode/opencode.db")
 const REPORT_PATH = join(homedir(), ".local/share/opencode/insight-report.html")
 const FACETS_DIR = join(homedir(), ".local/share/opencode/facets")
 const CONFIG_PATH = join(homedir(), ".config/opencode/opencode.json")
+const AUTH_PATH = join(homedir(), ".local/share/opencode/auth.json")
 const SINCE = Date.now() - DAYS * 24 * 60 * 60 * 1000
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000
 
 mkdirSync(FACETS_DIR, { recursive: true })
 
 // ─── API Config ───────────────────────────────────────────────────────────────
-// 官方 provider 的默认 baseURL（无需用户配置 baseURL）
+// apiKey 存在 auth.json（按 provider id 索引），baseURL 存在 opencode.json provider.options
+// Anthropic 格式用 /messages，其余用 /chat/completions（OpenAI 兼容）
 const PROVIDER_BASE_URLS = {
   anthropic: "https://api.anthropic.com/v1",
   openai: "https://api.openai.com/v1",
   groq: "https://api.groq.com/openai/v1",
   deepseek: "https://api.deepseek.com/v1",
   mistral: "https://api.mistral.ai/v1",
-  gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
-}
-
-// 官方 provider 的首选强力模型
-const PROVIDER_PREFERRED_MODELS = {
-  anthropic: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-  groq: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
-  deepseek: ["deepseek-chat", "deepseek-coder"],
-  mistral: ["mistral-large-latest", "mistral-medium-latest"],
-  gemini: ["gemini-1.5-pro", "gemini-1.5-flash"],
 }
 
 function loadApiConfig() {
   if (!existsSync(CONFIG_PATH)) return null
   try {
     const cfg = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
+    const auth = existsSync(AUTH_PATH) ? JSON.parse(readFileSync(AUTH_PATH, "utf8")) : {}
     const disabled = new Set(cfg.disabled_providers ?? [])
 
-    // 优先：自定义 baseURL provider（国内代理等）
     for (const [id, provider] of Object.entries(cfg.provider ?? {})) {
       if (disabled.has(id)) continue
       const opts = provider.options ?? {}
-      if (opts.apiKey && opts.baseURL) {
-        const models = Object.keys(provider.models ?? {})
-        const preferred = ["kimi-k2.5", "qwen3-coder-plus", "qwen3.5-plus", "qwen3-max", "glm-5", "glm-4.7"]
-        const model = preferred.find((m) => models.includes(m)) ?? models[0]
-        if (model) return { baseURL: opts.baseURL, apiKey: opts.apiKey, model, provider: id }
-      }
-    }
-
-    // 回退：官方 provider（只有 apiKey，无 baseURL）
-    for (const [id, provider] of Object.entries(cfg.provider ?? {})) {
-      if (disabled.has(id)) continue
-      const opts = provider.options ?? {}
+      // apiKey 优先从 auth.json 取，再从 opencode.json options 取
+      const apiKey = auth[id]?.key ?? opts.apiKey
       const baseURL = opts.baseURL ?? PROVIDER_BASE_URLS[id]
-      if (!opts.apiKey || !baseURL) continue
+      if (!apiKey || !baseURL) continue
       const models = Object.keys(provider.models ?? {})
-      const preferredList = PROVIDER_PREFERRED_MODELS[id] ?? []
-      const model = preferredList.find((m) => models.includes(m)) ?? models[0]
-      if (model) return { baseURL, apiKey: opts.apiKey, model, provider: id }
+      // 优先选文本生成能力强的模型，跳过 embedding/image 等
+      const preferred = [
+        "claude-opus-4-5","claude-sonnet-4-5","claude-3-5-sonnet-latest",
+        "gpt-4o","gpt-4o-mini",
+        "kimi-k2.5","qwen3-coder-plus","qwen3.5-plus","qwen3-max",
+        "glm-5","glm-4.7","deepseek-chat","deepseek-coder",
+        "llama-3.3-70b-versatile","mistral-large-latest",
+      ]
+      const model = preferred.find((m) => models.includes(m)) ?? models[0]
+      if (model) return { baseURL, apiKey, model, provider: id }
     }
   } catch (e) {
     process.stderr.write(`⚠️ 读取 API 配置失败: ${e.message}\n`)
@@ -85,29 +73,24 @@ const API_CFG = loadApiConfig()
 async function callLLM(messages, maxTokens = 4096) {
   if (!API_CFG) throw new Error("未找到可用的 API 配置")
 
-  // 判断是否为 OpenAI 兼容格式（非 Anthropic）
-  const isOpenAICompat = !["anthropic"].includes(API_CFG.provider) &&
-    !API_CFG.baseURL.includes("anthropic.com")
-
-  const url = isOpenAICompat
-    ? `${API_CFG.baseURL.replace(/\/$/, "")}/chat/completions`
-    : `${API_CFG.baseURL.replace(/\/$/, "")}/messages`
-
-  const body = isOpenAICompat
-    ? { model: API_CFG.model, max_tokens: maxTokens, messages }
-    : { model: API_CFG.model, max_tokens: maxTokens, messages }
+  // Anthropic 格式：provider id 是 anthropic，或 baseURL 路径含 anthropic（兼容代理）
+  const isAnthropicFormat = API_CFG.provider === "anthropic" ||
+    API_CFG.baseURL.includes("anthropic")
+  const url = isAnthropicFormat
+    ? `${API_CFG.baseURL.replace(/\/$/, "")}/messages`
+    : `${API_CFG.baseURL.replace(/\/$/, "")}/chat/completions`
 
   const resp = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${API_CFG.apiKey}`,
-      ...(isOpenAICompat ? {} : {
+      ...(isAnthropicFormat ? {
         "x-api-key": API_CFG.apiKey,
         "anthropic-version": "2023-06-01",
-      }),
+      } : {}),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ model: API_CFG.model, max_tokens: maxTokens, messages }),
   })
   if (!resp.ok) {
     const err = await resp.text()
