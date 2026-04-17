@@ -49,7 +49,10 @@ function loadApiConfig() {
       // apiKey 优先从 auth.json 取，再从 opencode.json options 取
       const apiKey = auth[id]?.key ?? opts.apiKey
       const baseURL = opts.baseURL ?? PROVIDER_BASE_URLS[id]
-      if (!apiKey || !baseURL) continue
+      if (!apiKey || !baseURL) {
+        process.stderr.write(`  [debug] 跳过 ${id}: apiKey=${!!apiKey} baseURL=${!!baseURL}\n`)
+        continue
+      }
       const models = Object.keys(provider.models ?? {})
       // 优先选文本生成能力强的模型，跳过 embedding/image 等
       const preferred = [
@@ -60,10 +63,23 @@ function loadApiConfig() {
         "llama-3.3-70b-versatile","mistral-large-latest",
       ]
       const model = preferred.find((m) => models.includes(m)) ?? models[0]
-      if (model) return { baseURL, apiKey, model, provider: id }
+      if (model) {
+        process.stderr.write(`  [debug] 选用 provider=${id} model=${model} baseURL=${baseURL.slice(0,40)}...\n`)
+        return { baseURL, apiKey, model, provider: id }
+      }
+      process.stderr.write(`  [debug] 跳过 ${id}: 无可用 model（${models.join(",")}）\n`)
     }
   } catch (e) {
     process.stderr.write(`⚠️ 读取 API 配置失败: ${e.message}\n`)
+  }
+  process.stderr.write(`⚠️ 未找到可用 provider。请检查:\n`)
+  process.stderr.write(`   配置文件: ${CONFIG_PATH}  存在=${existsSync(CONFIG_PATH)}\n`)
+  process.stderr.write(`   认证文件: ${AUTH_PATH}  存在=${existsSync(AUTH_PATH)}\n`)
+  if (existsSync(AUTH_PATH)) {
+    try {
+      const auth = JSON.parse(readFileSync(AUTH_PATH, "utf8"))
+      process.stderr.write(`   auth.json providers: ${Object.keys(auth).join(", ")}\n`)
+    } catch (_) {}
   }
   return null
 }
@@ -921,8 +937,13 @@ const rawSessions = db
             ORDER BY time_updated DESC`)
   .all(SINCE)
 
-process.stderr.write(`分析最近 ${DAYS} 天的 ${rawSessions.length} 个会话...\n`)
-const summaries = rawSessions.map(analyzeSession)
+process.stderr.write(`分析最近 ${DAYS} 天的 ${rawSessions.length} 个会话（读取数据库）...\n`)
+const summaries = rawSessions.map((s, i) => {
+  if (i === 0 || (i + 1) % 20 === 0 || i === rawSessions.length - 1) {
+    process.stderr.write(`  读取中 ${i + 1}/${rawSessions.length}...\n`)
+  }
+  return analyzeSession(s)
+})
 
 if (!API_CFG) {
   process.stderr.write("⚠️ 未找到 API 配置，仅生成统计报告（无 LLM 分析）\n")
