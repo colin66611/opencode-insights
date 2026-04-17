@@ -40,7 +40,9 @@ function loadApiConfig() {
         if (model) return { baseURL: opts.baseURL, apiKey: opts.apiKey, model, provider: id }
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    process.stderr.write(`⚠️ 读取 API 配置失败: ${e.message}\n`)
+  }
   return null
 }
 
@@ -91,19 +93,25 @@ function escHtml(s) {
 }
 
 function parseJson(text) {
-  // strip markdown code blocks
   const stripped = text.replace(/```(?:json)?\n?/g, "").trim()
-  const m = stripped.match(/\{[\s\S]*\}/)
-  if (!m) throw new Error("未找到 JSON object")
-  return JSON.parse(m[0])
+  // 先直接整体 parse
+  try { return JSON.parse(stripped) } catch (_) {}
+  // 回退：截取 { ... } 范围
+  const start = stripped.indexOf("{")
+  const end = stripped.lastIndexOf("}")
+  if (start === -1 || end === -1) throw new Error("未找到 JSON object")
+  return JSON.parse(stripped.slice(start, end + 1))
 }
 
 function parseJsonArray(text) {
-  // strip markdown code blocks
   const stripped = text.replace(/```(?:json)?\n?/g, "").trim()
-  const m = stripped.match(/\[[\s\S]*\]/)
-  if (!m) throw new Error("未找到 JSON array")
-  return JSON.parse(m[0])
+  // 先直接整体 parse
+  try { return JSON.parse(stripped) } catch (_) {}
+  // 回退：截取 [ ... ] 范围
+  const start = stripped.indexOf("[")
+  const end = stripped.lastIndexOf("]")
+  if (start === -1 || end === -1) throw new Error("未找到 JSON array")
+  return JSON.parse(stripped.slice(start, end + 1))
 }
 
 // ─── Phase 1: SessionMeta ─────────────────────────────────────────────────────
@@ -236,7 +244,12 @@ async function extractFacets(sessionId, transcript) {
     content: `${FACET_EXTRACTION_PROMPT}\n\n===SESSION TRANSCRIPT===\n${transcript}`
   }], 1024)
 
-  const data = parseJson(text)
+  let data
+  try {
+    data = parseJson(text)
+  } catch (e) {
+    throw new Error(`JSON 解析失败: ${e.message} | LLM 返回前200字: ${text.slice(0, 200)}`)
+  }
   writeFileSync(cachePath, JSON.stringify({ ts: Date.now(), data }))
   return data
 }
@@ -519,13 +532,15 @@ function generateHtml(summaries, agg, sections, atAGlance) {
   // ── at_a_glance ──
   let ag = null
   if (atAGlance) {
-    try { ag = parseJson(atAGlance) } catch (_) {
-      ag = { summary: atAGlance, whats_working: null, whats_hindering: null, quick_wins: null, ambitious_workflows: null }
+    try { ag = parseJson(atAGlance) } catch (e) {
+      process.stderr.write(`⚠️ at_a_glance 解析失败: ${e.message}\n`)
+      const cleanSummary = atAGlance.replace(/```(?:json)?\n?/g, "").trim()
+      ag = { summary: cleanSummary, whats_working: null, whats_hindering: null, quick_wins: null, ambitious_workflows: null }
     }
   }
 
   const atAGlanceHtml = ag ? `
-  <div class="at-a-glance">
+  <div class="at-a-glance" id="section-glance">
     <div class="glance-title">At a Glance</div>
     <div class="glance-sections">
       ${ag.summary ? `<div class="glance-section">${escHtml(ag.summary)}</div>` : ""}
@@ -609,7 +624,9 @@ function generateHtml(summaries, agg, sections, atAGlance) {
   let suggestionsData = null
   const suggestionsText = getSectionText("suggestions")
   if (suggestionsText) {
-    try { suggestionsData = parseJson(suggestionsText) } catch (_) {}
+    try { suggestionsData = parseJson(suggestionsText) } catch (e) {
+      process.stderr.write(`⚠️ suggestions 解析失败: ${e.message}\n`)
+    }
   }
 
   const agMdData = suggestionsData?.agents_md_additions ?? []
@@ -663,7 +680,11 @@ function generateHtml(summaries, agg, sections, atAGlance) {
   // ── fun_ending ──
   let funData = null
   const funText = getSectionText("fun_ending")
-  if (funText) { try { funData = parseJson(funText) } catch (_) {} }
+  if (funText) {
+    try { funData = parseJson(funText) } catch (e) {
+      process.stderr.write(`⚠️ fun_ending 解析失败: ${e.message}\n`)
+    }
+  }
   const funHtml = funData?.headline ? `
   <div class="fun-ending">
     <div class="fun-headline">"${escHtml(funData.headline)}"</div>
@@ -803,6 +824,7 @@ function generateHtml(summaries, agg, sections, atAGlance) {
   ${atAGlanceHtml}
 
   <nav class="nav-toc">
+    <a href="#section-glance">At a Glance</a>
     <a href="#section-portrait">使用画像</a>
     <a href="#section-highlights">工作流亮点</a>
     <a href="#section-friction">摩擦点</a>
@@ -912,7 +934,9 @@ const facetsMap = new Map()
 for (const s of eligible) {
   const p = join(FACETS_DIR, `${s.id}.json`)
   if (existsSync(p)) {
-    try { facetsMap.set(s.id, JSON.parse(readFileSync(p, "utf8")).data) } catch (_) {}
+    try { facetsMap.set(s.id, JSON.parse(readFileSync(p, "utf8")).data) } catch (e) {
+      process.stderr.write(`⚠️ facet 缓存损坏 ${s.id}: ${e.message}\n`)
+    }
   }
 }
 
@@ -920,8 +944,8 @@ for (const s of eligible) {
 const agg = aggregateData(summaries, facetsMap)
 const dataContext = buildDataContext(agg)
 
-// Phase 4: 6 parallel sections
-process.stderr.write(`LLM 生成 6 个并行 section（${API_CFG.provider}/${API_CFG.model}）...\n`)
+// Phase 4: 7 parallel sections
+process.stderr.write(`LLM 生成 7 个并行 section（${API_CFG.provider}/${API_CFG.model}）...\n`)
 
 const sectionNames = ["project_areas", "interaction_style", "what_works", "friction_analysis", "suggestions", "on_the_horizon", "fun_ending"]
 const sectionResults = await Promise.all(
